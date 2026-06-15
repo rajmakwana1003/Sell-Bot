@@ -741,16 +741,39 @@ async def user_profile(message: Message, state: FSMContext, session: AsyncIOMoto
     user_q   = get_user_by_id(session, message.from_user.id)
     counts_q = get_user_order_counts(session, message.from_user.id)
     user, (bought, spent) = await asyncio.gather(user_q, counts_q)
+    
     if not user:
         return await message.answer("❌ Error. Try /start")
-    text = (f"👤 <b>USER DASHBOARD</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📛 <b>Name:</b> {message.from_user.full_name}\n"
-            f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
-            f"📅 <b>Joined:</b> {user.created_at.strftime('%d %b %Y')}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🛍️ <b>Successful Orders:</b> {bought}\n"
-            f"💸 <b>Total Invested:</b> ₹{float(spent):.2f}\n"
-            f"👥 <b>Total Referrals:</b> {user.referral_count}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>Status:</b> {'🔴 Blacklisted' if user.is_blocked else '⚠️ Flagged' if user.is_suspicious else '🟢 Active'}")
-    await message.answer(text)
+    
+    status_icon = "🟢" if not user.is_blocked and not user.is_suspicious else "⚠️" if user.is_suspicious else "🔴"
+    status_text = "Blacklisted" if user.is_blocked else "Flagged" if user.is_suspicious else "Active Member"
+    
+    text = (
+        f"👤 <b>USER DASHBOARD</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👋 <b>Welcome back, {message.from_user.first_name}!</b>\n\n"
+        f"🆔 <b>Account ID:</b> <code>{user.id}</code>\n"
+        f"📅 <b>Member Since:</b> {user.created_at.strftime('%d %b %Y')}\n"
+        f"🛡️ <b>Account Status:</b> {status_icon} {status_text}\n\n"
+        f"📊 <b>PURCHASE STATS</b>\n"
+        f"├─ 🛍️ <b>Orders:</b> <code>{bought}</code>\n"
+        f"└─ 💸 <b>Invested:</b> <b>₹{float(spent):.2f}</b>\n\n"
+        f"👥 <b>REFERRAL STATS</b>\n"
+        f"├─ 🤝 <b>Invites:</b> <code>{user.referral_count}</code>\n"
+        f"└─ 🔗 <b>Link:</b> <a href='https://t.me/{(await message.bot.get_me()).username}?start={user.id}'>Get Invite Link</a>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🚀 <i>Thank you for being part of our community!</i>"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛍️ My Orders", callback_data="back_to_history"), 
+         InlineKeyboardButton(text="🤝 Invite Friends", callback_data="view_referral_link")],
+        [InlineKeyboardButton(text="🆘 Contact Support", callback_data="view_support_from_profile")]
+    ])
+    
+    await message.answer(text, reply_markup=kb, disable_web_page_preview=True)
+
+@router.callback_query(F.data == "view_support_from_profile")
+async def view_support_from_profile_cb(callback: CallbackQuery, state: FSMContext, session: AsyncIOMotorDatabase):
+    await user_faq(callback.message, state, session)
+    await callback.answer()
