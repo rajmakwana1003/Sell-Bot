@@ -429,6 +429,10 @@ async def add_coupon_price_proc(message: Message, state: FSMContext):
     cat_id = data.get('target_cat_id')
     valid_codes = data.get('pending_codes', [])
     cat_name = data.get('pending_cat_name', '')
+    
+    if not cat_id or not valid_codes:
+        await state.clear()
+        return await message.answer("❌ Error: Process timed out or data lost. Please try adding codes again.")
 
     # Resolve price
     if message.text.strip().lower() == 'same':
@@ -456,7 +460,7 @@ async def add_coupon_price_proc(message: Message, state: FSMContext):
     ])
     await message.answer(f"✅ Added <b>{len(valid_codes)}</b> codes to <b>{cat_name}</b> at <b>₹{price}</b> each.", reply_markup=kb)
 
-@router.callback_query(F.data.startswith("admin_edit_price_"))
+@router.callback_query(F.data.startswith("admin_edit_price_"), ~F.data.endswith("_exec"))
 async def edit_price_start(callback: CallbackQuery, state: FSMContext):
     cat_id = int(callback.data.split("_")[-1])
     async with AsyncSessionLocal() as session:
@@ -479,6 +483,10 @@ async def edit_price_proc(message: Message, state: FSMContext):
     
     data = await state.get_data()
     cat_id = data.get('edit_cat_id')
+    
+    if not cat_id:
+        await state.clear()
+        return await message.answer("❌ Error: State lost. Please select category again.")
     
     async with AsyncSessionLocal() as session:
         cat = await get_category(session, cat_id)
@@ -506,6 +514,9 @@ async def edit_price_exec(callback: CallbackQuery, state: FSMContext):
     new_price = data.get('new_price')
     old_price = data.get('old_price')
     
+    if not cat_id:
+        return await callback.answer("❌ Error: State lost. Please start over.", show_alert=True)
+    
     async with AsyncSessionLocal() as session:
         await update_category_price(session, cat_id, new_price)
         cat = await get_category(session, cat_id)
@@ -519,7 +530,7 @@ async def edit_price_exec(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"✅ Price for <b>{cat_name}</b> updated to <b>₹{new_price}</b>!", reply_markup=kb)
     await callback.answer()
 
-@router.callback_query(F.data.startswith("admin_edit_terms_"))
+@router.callback_query(F.data.startswith("admin_edit_terms_"), ~F.data.endswith("_exec"))
 async def edit_terms_start(callback: CallbackQuery, state: FSMContext):
     cat_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_cat_id=cat_id)
@@ -549,10 +560,8 @@ async def edit_terms_exec(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("✅ Terms updated!")
     await callback.answer()
-    # No easy way to return to admin_vouchers with Message object from here without re-triggering, 
-    # but the success message is enough. User can click menu.
 
-@router.callback_query(F.data.startswith("admin_edit_name_"))
+@router.callback_query(F.data.startswith("admin_edit_name_"), ~F.data.endswith("_exec"))
 async def edit_cat_name_start(callback: CallbackQuery, state: FSMContext):
     cat_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_cat_id=cat_id)
@@ -583,7 +592,7 @@ async def edit_name_exec(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"✅ Category name updated to: <b>{data['new_name']}</b>")
     await callback.answer()
 
-@router.callback_query(F.data.startswith("admin_edit_desc_"))
+@router.callback_query(F.data.startswith("admin_edit_desc_"), ~F.data.endswith("_exec"))
 async def edit_cat_desc_start(callback: CallbackQuery, state: FSMContext):
     cat_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_cat_id=cat_id)
@@ -789,7 +798,13 @@ async def suspicious_users_cb(callback: CallbackQuery, state: FSMContext, sessio
 async def admin_notify_update_cb(callback: CallbackQuery, bot: Bot, session: AsyncIOMotorDatabase):
     parts = callback.data.split("_")
     action = parts[2]
-    cat_id = int(parts[4] if action == "cat" else parts[3])
+    
+    try:
+        raw_id = parts[4] if action == "cat" else parts[3]
+        if raw_id == "None": raise ValueError
+        cat_id = int(raw_id)
+    except (ValueError, IndexError):
+        return await callback.answer("❌ Error: Invalid Category ID. Please refresh and try again.", show_alert=True)
     
     cat = await get_category(session, cat_id)
     if not cat:
